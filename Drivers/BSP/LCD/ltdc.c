@@ -240,6 +240,9 @@ void ltdc_init(void)
     ltdc_display_dir(1); /* 默认横屏 */
     ltdc_select_layer(0);
     
+    /* 使能重载中断 (用于 VSYNC 同步) */
+    __HAL_LTDC_ENABLE_IT(&g_ltdc_handle, LTDC_IT_RR);
+
     /* 恢复引脚并开启背光 */
     LTDC_BL(1); 
     ltdc_clear(0XFFFF);  
@@ -277,8 +280,25 @@ void HAL_LTDC_MspInit(LTDC_HandleTypeDef *hltdc)
     gpio_init_struct.Pin = GPIO_PIN_9 | GPIO_PIN_10 | GPIO_PIN_11 | GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15; HAL_GPIO_Init(GPIOH, &gpio_init_struct);
     gpio_init_struct.Pin = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7 | GPIO_PIN_9 | GPIO_PIN_10; HAL_GPIO_Init(GPIOI, &gpio_init_struct);
 
-    /* 先不开启中断，防止未定义中断服务函数导致死机 */
-    // HAL_NVIC_EnableIRQ(LTDC_IRQn);
+    /* 开启 LTDC 中断 */
+    HAL_NVIC_SetPriority(LTDC_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(LTDC_IRQn);
+}
+
+/**
+ * @brief       LTDC 中断服务函数
+ */
+void LTDC_IRQHandler(void)
+{
+    HAL_LTDC_IRQHandler(&g_ltdc_handle);
+}
+
+/**
+ * @brief       LTDC 重新加载回调函数 (VSYNC 发生)
+ */
+void HAL_LTDC_ReloadEventCallback(LTDC_HandleTypeDef *hltdc)
+{
+    g_wait_for_reload = 0; /* 清除等待标志 */
 }
 
 /**
@@ -286,6 +306,12 @@ void HAL_LTDC_MspInit(LTDC_HandleTypeDef *hltdc)
  */
 void ltdc_switch_buffer(uint8_t buffer_idx)
 {
+    g_wait_for_reload = 1;
+    /* 设置下一帧的显存地址 */
     HAL_LTDC_SetAddress(&g_ltdc_handle, (uint32_t)g_ltdc_framebuf[buffer_idx], 0);
-    __HAL_LTDC_RELOAD_IMMEDIATE_CONFIG(&g_ltdc_handle); /* 暂时改用立即重载 */
+    /* 配置在下一个垂直空白期重新加载 (防止撕裂) */
+    HAL_LTDC_Reload(&g_ltdc_handle, LTDC_RELOAD_VERTICAL_BLANKING);
+    
+    /* 等待 VSYNC 发生，确保 LTDC 已经切换到新缓冲区 */
+    while (g_wait_for_reload);
 }

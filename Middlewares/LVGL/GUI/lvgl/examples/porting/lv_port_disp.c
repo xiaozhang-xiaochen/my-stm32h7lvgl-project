@@ -105,13 +105,20 @@ void disp_disable_update(void)
 static void disp_flush(lv_display_t * disp_drv, const lv_area_t * area, uint8_t * px_map)
 {
     if(disp_flush_enabled) {
-        /* 对于 DIRECT 模式，LVGL 已经直接在 SDRAM 显存中完成了绘制。
-         * 在切换前，必须将 CPU Cache 中的内容刷入 SDRAM，否则 LTDC 读取到的可能是旧数据导致花屏。
+        /* 
+         * 优化：仅针对修改区域进行 Cache 刷入，避免全屏刷新导致的高开销。
+         * 计算当前刷新区域的字节数并按行进行清理，或者如果区域较大则简单处理。
          */
-        SCB_CleanDCache_by_Addr((uint32_t *)px_map, MY_DISP_HOR_RES * MY_DISP_VER_RES * BYTE_PER_PIXEL);
+        int32_t width = lv_area_get_width(area);
+        int32_t height = lv_area_get_height(area);
+        
+        for(int32_t y = area->y1; y <= area->y2; y++) {
+            uint16_t * line_start = (uint16_t *)px_map + (y * MY_DISP_HOR_RES) + area->x1;
+            SCB_CleanDCache_by_Addr((uint32_t *)line_start, width * 2);
+        }
 
         if(lv_display_flush_is_last(disp_drv)) {
-            /* 切换 LTDC 显示缓冲区 */
+            /* 切换 LTDC 显示缓冲区 (该函数内部已实现 VSYNC 同步) */
             if((uint32_t)px_map == LTDC_FRAME_BUF_ADDR) {
                 ltdc_switch_buffer(0);
             } else {
