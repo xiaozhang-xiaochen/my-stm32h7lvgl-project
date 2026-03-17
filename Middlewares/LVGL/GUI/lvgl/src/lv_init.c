@@ -38,7 +38,7 @@
 #include "misc/lv_fs.h"
 #include "themes/lv_theme.h"
 #include "themes/default/lv_theme_default.h"
-
+#include "lv_os.h"
 
 #if LV_USE_SVG
     #include "libs/svg/lv_svg_decoder.h"
